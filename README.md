@@ -3,10 +3,13 @@ Multi-exponetional fitting of TCSPC histograms
 
 fitting program
 
+Batch proccessing, select multiple files in the GUI
 reads PTU files via the PTUreader https://github.com/SumeetRohilla/readPTU_FLIM
 
 With this script you can fit TCSPC lifetime histograms to single, double or triple order exponential fit with reconvolution method
 Minimalization method are NLLS / MLE-Nelder-Mead minimalisation methods.
+
+
 
 Input data histogream shaping options
 1. select SPAD channel from PTU file (Channel)
