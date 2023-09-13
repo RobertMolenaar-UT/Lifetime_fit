@@ -2,7 +2,7 @@
 """
 @author: r.molenaar@utwente.nl   20 March 2023
 
-Lifetime fitting with picoquant hardware PTU file formats
+Lifetime fitting with picoquant hardware *.PTU file formats
 Fitting is based on the NLLS and MLS fitting developped by MSc. Leroy Tromp.
 https://lmfit.github.io/lmfit-py/index.html#
 
@@ -45,16 +45,16 @@ peak_lim           = 100000   # histogram is cycled until peak value is reached
 Drop_multi_TAC_count   = True   # filter double photons after APD recovery seen at high concentrations & powers with long lifetime species recommended True
 
 #fitting options
-method             = 'leastsq'     #other is 'Nelder-mead' Nelder-mead has preference for low counts
+method             = 'leastsq'     #other is 'Nelder-mead' Nelder-mead has preference for low counts histograms
 #method             = 'Nelder-Mead'    
 Feed_NLLSfit_as_guess_MLE = True   #applies for Nelder-Mead fitting, recommended TRUE MLE can use a good initial guess, so NLLS output is used as input for MLE
 
 sample_name        =  'Sample'
 output_dname       =  'Lifetime_Fit'
-Default_Folder     = r'c:\Your_directory\picoquant.sptw'                       # sympotime folder   
+Default_Folder     = r'c:\Your_directory\picoquant.sptw'                       # Symphotime folder   
 irf_fname          = r'c:\Your_directory\picoquant.sptw\IRF_20MHz_1.ptu'       # IRF_file in the root of the *.sptw folder
 
-plot_ig_fig        = True       #include initial guess in the plotting, nice for initial gusee
+plot_ig_fig        = True       #include initial guess in the plotting, nice for initial guess
 manual_irf         = True       #user array values from
 
 irf_source         = 'File'     #Instrument responce read from a IRF.PTU file
@@ -259,6 +259,7 @@ def get_irf_background(channels, counts):
 
 # In[15]:
 
+#↓  the ACTUAL scripts starts from here ↓
 
 GUI_MultiPick = True
 
@@ -567,7 +568,7 @@ for path in path_select:
 
      
     # In[31]:
-    # LOAD some conversion routines needed for 'Nleder-Mead'
+    # LOAD some conversion routines needed for MLE 'Nelder-Mead'
     if method == 'Nelder-Mead':
         def loglike_1exp(params, x, ydata):
             tau, ampl, baseline, offset = params
