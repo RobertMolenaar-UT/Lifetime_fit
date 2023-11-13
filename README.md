@@ -1,14 +1,11 @@
 # Lifetime_fit
-Multi-exponetional fitting of TCSPC histograms
+Multi-exponetional fitting of TCSPC histograms based on full reconvolution method.
 
-Full reconvolution lifetime fitting
-
-Batch proccessing, select multiple files via the GUI
-reads PTU files via the PTUreader https://github.com/SumeetRohilla/readPTU_FLIM
+Batchwise proccessing, select 1 or multiple files via the GUI
+Data is read via the PTUreader https://github.com/SumeetRohilla/readPTU_FLIM
 
 With this script you can fit TCSPC lifetime histograms to single, double or triple order exponential fit with reconvolution method
 Minimalization method are NLLS / MLE-Nelder-Mead minimalisation methods.
-
 
 Input data histogream shaping options
 1. select SPAD channel from PTU file (Channel)
@@ -16,21 +13,18 @@ Input data histogream shaping options
 3. Limit/set histogram peak value (peak_lim)
 4. Long lifetime/phosforence remove 2nd photon afer APD deadtime recovery (Drop_multi_AC_count)
 
+1. Fitting Methods: NLLS or MLE
+2. fit_order 'single, 'double' or 'triple'
+3. One can fix any of the fitting parameters
+4. Fitting boundaries can set
+5. IRF from experimental file or Automatic reconstruction
 
-Fitting Methods: NLLS or MLE
-fit_order 'single, 'double' or 'triple'
-One can fix any of the fitting parameters
-Fitting boundaries can set
-IRF from experimental file or Automatic reconstruction
+Output shows exp fit components and intensity weighted average lifetime.
 
-Output All components and intensity weigthed average lifetime.
-
-
-
-Fitting output
+Example: Fitting output.
 ![High1_T0s_1__2expfit](https://github.com/RobertMolenaar-UT/Lifetime_fit/assets/74496038/15d0058a-f545-4184-b22f-86f5fee39324)
 
-visaul on Automatic IRF reconstruction
+Example: visual on Automatic IRF reconstruction.
 ![irf_construct](https://github.com/RobertMolenaar-UT/Lifetime_fit/assets/74496038/7d0d77b3-e88a-4c96-8154-4fe1f211d94d)
 
 CSV output of decays → time [ns], IRF, TCSPC decay, fit, residuals. 
