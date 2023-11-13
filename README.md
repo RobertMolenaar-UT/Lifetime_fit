@@ -22,10 +22,9 @@ Fitting Methods: NLLS or MLE
 fit_order 'single, 'double' or 'triple'
 One can fix any of the fitting parameters
 Fitting boundaries can set
+IRF from experimental file or Automatic reconstruction
 
 Output All components and intensity weigthed average lifetime.
 
 Image output.
 CSV output: time [ns], IRF, TCSPC decay, fit, residuals.
-
-![flu4am_1_2expfit](https://github.com/RobertMolenaar-UT/Lifetime_fit/assets/74496038/0783d875-3b51-4a6b-8f92-d8714442c160)
