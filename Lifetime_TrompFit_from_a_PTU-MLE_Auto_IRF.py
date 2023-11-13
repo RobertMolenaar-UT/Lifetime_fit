@@ -21,7 +21,7 @@ Models: available single, double, triple exponential fit.
 20231105 - Added an Automatic IRF construction 
 """
 
-from ReadPTU_FLIM_Rm import PTUreader
+from readPTU_FLIM import PTUreader
 import numpy as np
 import os
 from ctypes import wintypes, windll
