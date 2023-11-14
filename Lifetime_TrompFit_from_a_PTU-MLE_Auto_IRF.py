@@ -61,7 +61,6 @@ irf_fname          = r'C:\user_folder\testsdata.sptw\IRF_20MHz_1.ptu'       # IR
 
 GUI_MultiPick      = True
 plot_ig_fig        = True       #include initial guess in the plotting, nice for initial gusee
-manual_irf         = False       #user array values from
 
 irf_source         = 'pulse'   #Instrumnet responce from a single pulse (usefull for lifetimes >100ns)
 irf_source         = 'File'     #Instrument responce read from a IRF.PTU file
