@@ -1,20 +1,18 @@
 # Lifetime_fit
 Multi-exponetional fitting of TCSPC histograms based on full reconvolution method.
 
-Batchwise proccessing, select 1 or multiple files via the GUI
-Data is read via the PTUreader https://github.com/SumeetRohilla/readPTU_FLIM
-
+## Discription
 With this script you can fit TCSPC lifetime histograms to single, double or triple order exponential fit with reconvolution method
-Minimalization method are NLLS / MLE-Nelder-Mead minimalisation methods.
+Minimalization method are NLLS / MLE-Nelder-Mead minimalisation methods. Batchwise proccessing, select 1 or multiple files via the GUI. And data is imported via the PTUreader https://github.com/SumeetRohilla/readPTU_FLIM
 
-Input data selection tools:
+## Input data selection tools:
 
 1. select SPAD channel from PTU file (Channel)
 2. Limit number of photos in the file (photons)
 3. Limit/set histogram peak value (peak_lim)
 4. Long lifetime/phosforence remove 2nd photon afer APD deadtime recovery (Drop_multi_AC_count)
 
-Fitting options
+## Fitting options
 1. Fitting Methods: NLLS or MLE (method)
 2. Fit order 'single, 'double' or 'triple' (fit_order)
 3. Fixing any of the fitting parameters. (set in lmfit params)
