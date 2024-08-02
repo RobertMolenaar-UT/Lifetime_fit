@@ -33,7 +33,12 @@ import math
 import lmfit
 import copy
 from scipy.optimize import minimize
-plt.style.use('seaborn-dark')
+
+try:
+    plt.style.use('seaborn-v0_8-dark')     #  seaborn-dark  https://matplotlib.org/3.1.1/gallery/style_sheets/style_sheets_reference.html
+except:
+    plt.style.use('seaborn')              #  seaborn-dark  https://matplotlib.org/3.1.1/gallery/style_sheets/style_sheets_reference.html
+
 
 # %%
 
