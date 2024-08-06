@@ -19,7 +19,7 @@ Models: available single, double, triple exponential fit.
          - options plot initial guess in figure, xlim_max value
          - Fix fitting values for NLLS,  cleanup code + variables
 20231105 - Added an Automatic IRF construction V3
-20240806 - Added 4th exponential fit in Least Square fit-method, some minor code cleanup.
+20240806 - Added 4th exponential, SPAD channel auto detection, fit in Least Square fit-method, some minor code cleanup.
 """
 
 from readPTU_FLIM import PTUreader
