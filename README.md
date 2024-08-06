@@ -45,6 +45,7 @@ Output shows exp fit components and intensity weighted average lifetime.
 
 ---
 Copyright Robert Molenaar, 2 August 2024
+Update 6, august 4th included 4th order fitting and channel autodetect.
 
 
 Keywords: PTU, Picoquant, fluorescent lifetime, reconvolution, TCSPC
