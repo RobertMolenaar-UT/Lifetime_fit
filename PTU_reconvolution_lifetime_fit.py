@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-@author: r.molenaar@utwente.nl   20 March 2023
+@author: r.molenaar@utwente.nl   6th August 2024
 
 Lifetime fitting with picoquant hardware PTU file formats
 Fitting is based on the NLLS and MLS fitting developped by MSc. Leroy Tromp.
@@ -18,7 +18,8 @@ Models: available single, double, triple exponential fit.
          - in Multiple files CSV _fit_values.dat is saved with
          - options plot initial guess in figure, xlim_max value
          - Fix fitting values for NLLS,  cleanup code + variables
-20231105 - Added an Automatic IRF construction 
+20231105 - Added an Automatic IRF construction V3
+20240806 - Added 4th exponential fit in Least Square fit-method, some minor code cleanup.
 """
 
 from readPTU_FLIM import PTUreader
@@ -33,12 +34,10 @@ import math
 import lmfit
 import copy
 from scipy.optimize import minimize
-
-try:
+try: 
     plt.style.use('seaborn-v0_8-dark')     #  seaborn-dark  https://matplotlib.org/3.1.1/gallery/style_sheets/style_sheets_reference.html
 except:
-    plt.style.use('seaborn')              #  seaborn-dark  https://matplotlib.org/3.1.1/gallery/style_sheets/style_sheets_reference.html
-
+    plt.style.use('seaborn') 
 
 # %%
 
@@ -49,11 +48,12 @@ except:
 
 
 # experimental settings
-Channel            = 1       # picoquant MT200 PTU files record all counts select detector here
-peak_lim           = 10000   # histogram is cycled until peak limit value is reached
-photons            = 0       # select the first n- number of photons set 0 to disable the function
-Drop_multi_TAC_count = True  # filter double photons after APD recovery seen at high concentrations & powers with long lifetime species recommended True
+Channel            = 'auto'     # set auto or channel INT value picoquant MT200 PTU files record all counts select detector here
+peak_lim           = 10000     # histogram is cycled until peak limit value is reached
+photons            = 0          # select the first n- number of photons set 0 to disable the function
+Drop_multi_TAC_count = True   # filter double photons after APD recovery seen at high concentrations & powers with long lifetime species recommended True
 
+fit_order          = 1          #exponential fit order 1, 2, 3, 4
 #fitting options
 method             = 'leastsq'     #other is 'Nelder-mead' Nelder-mead has preference for low counts
 #method            = 'Nelder-Mead'    
@@ -66,32 +66,33 @@ irf_fname          = r'C:\user_folder\testsdata.sptw\IRF_20MHz_1.ptu'       # IR
 
 GUI_MultiPick      = True
 plot_ig_fig        = True       #include initial guess in the plotting, nice for initial gusee
+manual_irf         = False       #user array values from
 
-irf_source         = 'pulse'   #Instrumnet responce from a single pulse (usefull for lifetimes >100ns)
 irf_source         = 'File'     #Instrument responce read from a IRF.PTU file
+irf_source         = 'manual'   #Instrument responce read from a manual defined array 
 irf_source         = 'auto'     #instrument responce automatically determined from the decay 
-smooth_irf         = 2          #post-moving average ove the AUTO IRF
-window_ma          = 4          # pre-moving average ove the AUTO IRF
+#irf_source         = 'pulse'   #Instrumnet responce from a single pulse (usefull for lifetimes >100ns)
+
+smooth_irf         = 1
+window_ma          = 1          #moving average ove the AUTO IRF
 
 save_fig           = True       #save the output figures
 Save_data_files    = True       #save the corresponding histogram CVS data
 Save_fit_values    = True       #save the Fit values of the fit
-
-fit_order          = 'triple'   #exponential for order: 'triple', 'double', 'single'
-fit_order          = 'double'
-#fit_order          = 'single'
-
+fig_dpi            = 200        #dpi settings of the output figures
 # initual guess parameters
 #to FIT Boundaries are set ↓ keyword #SET BOUNDARIES also for Fixing parameters
-ig_t1       = 0.5     #ns
-ig_t2       = 2       #ns
-ig_t3       = 5       #ns
-ig_ampl_1   = 2500   #cnt
-ig_ampl_2   = 2500   #cnt
-ig_ampl_3   = 0.001  #cnt
-ig_baseline = 5      #cnt
-ig_offset   = 0      #time bins
-start_from_ns  = 2.8 #irf start value (if no file is loaded)
+ig_t1     = 0.5     #ns
+ig_t2     = 2    #ns
+ig_t3     = 3    #ns
+ig_t4     = 15    #ns
+ig_ampl_1 = 2500 #cnt
+ig_ampl_2 = 2500 #cnt
+ig_ampl_3 = 20  #cnt
+ig_ampl_4 = 20  #cnt
+ig_baseline = 3   #cnt
+ig_offset = 0     #time bins
+start_from_ns = 2.8 #irf start value (if no file is loaded)
 
 xlim_max = None      #ns use 'None' to disable
 # xlim_max = 25       
@@ -137,7 +138,6 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
     plot       : bool,      optional plot IRF analysis. The default is True.
     save_fig   : bool,      optional save IRF reconstruction image. The default is False
     smooth_irf : int,       optional addes a adition moving average over the IRF output the supres noise, the default is 1
-    
     Returns   : irf with leading & traling zeroes. 
     -------
     Source: Symphotime64 TCSPC HELP section IRF
@@ -151,27 +151,20 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
 
     """
     
-    if np.diff(timestamps)[0] >33*1E-12:
-        print(f"NOTE: AUTO-irf time resolution {np.diff(timestamps)[0]*1E12:.1f}ps is low: decay smoothing {window} and irf smoothing {smooth_irf} is disabled\n")
-        window=1
-        smooth_irf=1
-    
     # first find the onset of the irf set a 0.005% from Imax.
     #IRF_argonset=np.where(decay_hist > threshold*np.max(decay_hist))[0][0]
-    irf_precursor=0.2 #ns extra time BEFORE The IRF_argonset
-    irf_precursor=int(irf_precursor/(np.diff(timestamps)[0]*1E9)) #swithch from nanoscends to argument index
-    IRF_argonset=np.where(decay_hist > threshold)[0][0]-irf_precursor
-       
-    #Extracting arguments for the fast decay fit just afer the max, to fit the fastest time component
+    IRF_argonset=np.where(decay_hist > threshold)[0][0]
+    irf_max_extend=0.2 #ns AFTER THE MAX argument the IRF is extened with x ns.   
+    
     #dynamic argument selection, start=0.2ns after stop, is the length makes it independent to timing resolution
-    irf_postcursor=0.3 #ns AFTER THE MAX argument the IRF is extened with x ns.   
-    start_slope=np.argmax(decay_hist)+int(irf_postcursor/(np.diff(timestamps)[0]*1E9))
-    stop_slope= np.argmax(decay_hist)+int((irf_postcursor+fast_range)/(np.diff(timestamps)[0]*1E9))
-    irf_postcursor=int(irf_postcursor/(np.diff(timestamps)[0]*1E9))  #swithch from nanoscends to argument index
+    slope_start=np.argmax(decay_hist)+int(irf_max_extend/(np.diff(timestamps)[0]*1E9))
+    slope_stop= np.argmax(decay_hist)+int((irf_max_extend+fast_range)/(np.diff(timestamps)[0]*1E9))
+    irf_max_extend=int(irf_max_extend/(np.diff(timestamps)[0]*1E9))
+    
     
     #apply a moving average over the input decay and select range 
-    decay_slope=moving_average(decay_hist, window)[start_slope:stop_slope]
-    times_slope=timestamps[start_slope:stop_slope]*1E9
+    decay_slope=moving_average(decay_hist, window)[slope_start:slope_stop]
+    times_slope=timestamps[slope_start:slope_stop]*1E9
     weights = 1/np.sqrt(decay_slope)
     
     #transfer selected fast component into 1exp fitting
@@ -189,16 +182,14 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
         nan_policy="omit")
     #fitting is done here
     fit_nlls_1exp_irf = mini_1exp_irf.minimize(method='leastsq')
-    
+    print('\IRF fast component fit fit results lmfit.minimizer')
     lmfit.report_fit(fit_nlls_1exp_irf,show_correl=False)
-    print('\nAUTO_irf ↑ fast component ↑ fit results lmfit.minimizer')
-    
     
     #apply 1exp fit results to build an exponention decay from Onset to max decay value
     #the onset to max decay_hist is selected for time and decay
     
-    timestamps_plot=timestamps[IRF_argonset:np.argmax(decay_hist)+irf_postcursor]
-    Convex_decay_plot=moving_average(decay_hist,window, "same")[IRF_argonset:np.argmax(decay_hist)+irf_postcursor]
+    timestamps_plot=timestamps[IRF_argonset:np.argmax(decay_hist)+irf_max_extend]
+    Convex_decay_plot=moving_average(decay_hist,window, "same")[IRF_argonset:np.argmax(decay_hist)+irf_max_extend]
     #Plot extrapolation
     Convex_predict=model_irf((timestamps_plot*1E9), fit_nlls_1exp_irf.params["tau"].value,fit_nlls_1exp_irf.params["ampl"].value, fit_nlls_1exp_irf.params['baseline'].value, fit_nlls_1exp_irf.params['offset'].value)
     
@@ -211,9 +202,7 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
     dt=np.diff(timestamps)
     #calculate fraction drop off, by using tau, but set amplitude to 1, offsets & base 0
     Fall_off=1*np.exp(-dt[0]*1E9/fit_nlls_1exp_irf.params["tau"].value)
-
-    print(f'AUTO-irf → Fall_off | {Fall_off:.3f} \n')
-    
+    print(f'Fall_off | {Fall_off:.3f} \n')
     
     #  Convex_diff=np.diff(Convex_predict)     #predicion
     irf=np.zeros(len(Convex_predict))
@@ -225,13 +214,16 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
         i+=1
     
     irf=np.roll(irf,1) # the irf got shifted by the previous operation, Her its shifted back
+    #timestamps_plot2=timestamps_plot
+    
+
     
     if plot:
         fig_1, axs = plt.subplots(1, 1, figsize=(8, 5))
         axs.set_title('Auto IRF reconstruction ', size=11)
         axs.set_yscale('log')
         axs.set_ylim([0.9, np.max(Convex_predict)*2])
-        axs.set_xlim([1.8, 4.2])
+        axs.set_xlim([2, 5])
         axs.scatter(timestamps*1e9, decay_hist, alpha =0.1,  label='Input decay')
         axs.scatter(times_slope, decay_slope, alpha =0.5,  label='Fast fit component ')
         axs.scatter(timestamps_plot*1e9, Convex_predict, alpha =0.2,  label='Extrapolated decay')
@@ -245,18 +237,18 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
         axs.set_xlabel('Time [ns]', size=12)
         axs.legend(loc='lower right', fontsize=11)
         plt.plot
-    
+        
     irf=np.where(irf<1,0,irf)   #delete any negative values
     irf=np.append(np.zeros(IRF_argonset+0), irf)  #add leading zeros
     irf=np.append(irf, np.zeros(len(decay_hist)-len(irf))) #add trailing zeroes to match hist_decay lenght
-
+    irf=moving_average(irf, smooth_irf)
     
     if save_fig:
         #save the figure
-        fname_save = head+output_dname
-        if not os.path.exists(fname_save):
-            os.makedirs(fname_save)
-        fig_1.savefig(fname_save+'irf_construct.png', bbox_inches='tight', dpi=300)
+        d_name_save = d_name+output_dname
+        if not os.path.exists(d_name_save):
+            os.makedirs(d_name_save)
+        fig_1.savefig(f'{d_name_save}irf_construct.png', bbox_inches='tight', dpi=fig_dpi)
     
     
     return irf
@@ -278,7 +270,7 @@ def GUI_select_Multi_file(message):
         It starts at the current working directory of the process
     """
     wildcard = "picoquant PTU (*.ptu)| *.ptu"
-    app = wx.App()
+    app = wx.App(clearSigInt=False)
     frame = wx.Frame(None, -1, 'win.py', style=wx.STAY_ON_TOP)
     frame.SetSize(0, 0, 200, 50)
     FilePicker = wx.FileDialog(frame, "Select you PTU files | single or Multiple", defaultDir=Default_Folder,
@@ -299,8 +291,9 @@ def GUI_select_folder(message):
                            default_path=Default_Folder, default_extension='*.ptu', wildcard=wildcard)
     directory, filename = os.path.split(path)
     app.Destroy()
-    print('Selected file folder: '+path)
+    print(f'Selected file folder: {path}')
     return directory
+
 
 
 def read_ptu_irf(path, fname='IRF.ptu', irf_ch=1, plot=False):
@@ -318,10 +311,10 @@ def read_ptu_irf(path, fname='IRF.ptu', irf_ch=1, plot=False):
     """
     fname = fname
     # read PTU file
-    head, tail = os.path.split(path)
+    d_name, f_name = os.path.split(path)
     # get pack to the root of the project folder to find irf.ptu
 
-    base = head.split('.sptw')
+    base = d_name.split('.sptw')
     pname = base[0]+'.sptw\\'
     irf_fname = pname+fname
     irf_file = PTUreader((irf_fname), print_header_data=False)
@@ -348,7 +341,7 @@ def read_ptu_irf(path, fname='IRF.ptu', irf_ch=1, plot=False):
 
     if plot:
         fig, axs = plt.subplots(1, 1, figsize=(8, 5))
-        axs.set_title('TCSPC IRF | '+head, size=11)
+        axs.set_title('TCSPC IRF | '+d_name, size=11)
         axs.set_yscale('log')
         axs.set_ylim([0.7, np.max(TCSPC)])
         axs.set_xlim([0, np.max(timestamps*1e9)/10])
@@ -358,7 +351,7 @@ def read_ptu_irf(path, fname='IRF.ptu', irf_ch=1, plot=False):
         axs.grid(True, which="minor", lw=0.3)
         axs.set_xlabel('Time [ns]', size=12)
         #plt.figtext(0.1, 0.01, ConfigSummary, ha="left", fontsize=12)
-        # plt.savefig(d_name+'\\'+"{:0>2d}".format(j)+'d_tcspc_'+f_name+'.png',dpi=300)
+        # plt.savefig(d_name+'\\'+"{:0>2d}".format(j)+'d_tcspc_'+f_name+'.png',dpi=fig_dpi)
         axs.legend(loc='upper right', fontsize=11)
         plt.plot
 
@@ -392,25 +385,20 @@ def Construct_histogram(ptu_df, BinEdges, peak_limit=0):
             ptu_df['tcspc'], bins=BinEdges)
         bins1 = np.delete(bins1, 0)
     else:
-
         try:
             decay_hist, bins1 = np.histogram(ptu_df['tcspc'], bins=BinEdges)
             max_indexes = ptu_df['tcspc'].index[ptu_df['tcspc']
                                                 == np.argmax(decay_hist)].tolist()
-            
-            #ptu_df_peak = ptu_df.iloc[:-int(len(ptu_df)-cut)]
             ptu_df_peak = ptu_df.iloc[0:max_indexes[peak_limit-1]]
             decay_hist_peaklim, bins1 = np.histogram(
                 ptu_df_peak['tcspc'], bins=BinEdges)
             bins1 = np.delete(bins1, 0)
         except:
-            
             decay_hist_peaklim, bins1 = np.histogram(
                 ptu_df['tcspc'], bins=BinEdges)
             bins1 = np.delete(bins1, 0)
-            print(f'NOTE: construct histogram, To few photons {np.max(decay_hist_peaklim)}ph to reach histogram peak of {peak_limit}ph.')
-
-    return decay_hist_peaklim, bins1
+            print(f'NOTE: To few photons {np.max(decay_hist_peaklim)}ph to reach the histogram peak of {peak_limit}ph \n')
+        return decay_hist_peaklim, bins1
 
 
 def get_irf_background(channels, counts):
@@ -434,9 +422,17 @@ def get_irf_background(channels, counts):
     #############################################################"""
 
 
+if fit_order==1:
+    fit_order='single'
+elif    fit_order==2:
+    fit_order='double'
+elif    fit_order==3:
+    fit_order='triple'
+elif    fit_order==4:
+    fit_order='quadruple'
+
 path_select = [0]
 Errors      = ['']
-
 
 
 if GUI_MultiPick == True:
@@ -461,41 +457,39 @@ else:
 
 # make a table of all files
 output_dname = '\\'+output_dname+'\\'
-Group_fit_values_df=pd.DataFrame(columns=['file','t1', 't2','t3','tav', 'a1', 'a2','a3'])        
+Group_fit_values_df=pd.DataFrame(columns=['file','t1', 't2','t3','t4','tav', 'a1', 'a2','a3', 'a4'])        
 
-j = 0
-for path in path_select:
+
+for j, path in enumerate(path_select):
     # Main loop that procceses all *.PTU files (path_select) from Multiple file pick or folder
-    head, tail = os.path.split(path)
-    print('')
-    print('File '+str(j+1)+ ' of '+ str(len(path_select))+' | opening file → '+tail)
-
+    d_name, f_name = os.path.split(path)
+    d_name_save = f'{d_name}{output_dname}'
+    print(f'\nFile {j+1} of {len(path_select)} | opening file → {f_name}')
     # open file
     ptu_file = PTUreader((path), print_header_data=False)
     # File checking if its 1D or 2d:
     if ptu_file.head["Measurement_SubMode"] != 0:
         Errors = np.append(Errors, path)
-        print('NOTE: PTU-reader, File is not a Point-measurement: skip to next *.PTU file')
+        print('NOTE: File is not a Point-measurement: skip to next *.PTU file')
         j+=1
         continue
-    #extract from datafram into an array
-    # ptu_arr = np.zeros((len(ptu_file.sync), 3))
-    # ptu_arr[:, 0] = ptu_file.sync
-    # ptu_arr[:, 1] = ptu_file.tcspc
-    # ptu_arr[:, 2] = ptu_file.channel
-    # index = list(range(0, len(ptu_file.sync)))
-
-    # ptu_df = pd.DataFrame(
-    #     {'sync': ptu_arr[:, 0], 'tcspc': ptu_arr[:, 1], 'channel': ptu_arr[:, 2]+1}, dtype=int)
     
+    if Channel =='auto':
+        Channel=np.unique(ptu_file.channel)[0]+1
+        print (f'Channel detected: ch{Channel}') 
+           
     ptu_df = pd.DataFrame(
-        {'sync': ptu_file.sync, 'tcspc': ptu_file.tcspc, 'channel': ptu_file.channel+1}, dtype=int)
+        {'sync': ptu_file.sync, 
+         'tcspc': ptu_file.tcspc, 
+         'channel': ptu_file.channel+1},
+        dtype=int)
     
+   
     # select only channel n- from the dataframe
     ptu_df = ptu_df[(ptu_df['channel'] == Channel)]
 
     if Drop_multi_TAC_count:
-        # Option remove double counts from the same sync pulse for long TAC range >100ns used with multiharp 150
+        # Option remove double counts from the same sync pulse for long TAC range >100ns used with multiharp 150, typically seen after the 23ns SPAD deadtime 
         ptu_df.drop_duplicates(
             subset=['sync'], keep='first', inplace=True, ignore_index=False)
 
@@ -509,6 +503,8 @@ for path in path_select:
     tac_bins = int(ptu_file.head['MeasDesc_GlobalResolution']/ptu_file.head['MeasDesc_Resolution'])
     BinEdges = np.linspace(0, tac_bins, tac_bins+1)
     decay_hist, bins1 = Construct_histogram(ptu_df, BinEdges, peak_lim)
+    
+        
     timestamps = bins1*ptu_file.head['MeasDesc_Resolution']
     time_step_ns = ptu_file.head['MeasDesc_Resolution']*1e9
     time_ns = timestamps*1e9
@@ -533,6 +529,7 @@ for path in path_select:
         # for convolution the surface ara of the irf needs to be set to 1
         irf_hist = irf_hist/np.sum(irf_hist)
             
+  
     elif irf_source == 'pulse':
         print(f'IRF: impulse at {start_from_ns:.3g}ns')
         startindex = int(start_from_ns/time_step_ns)
@@ -540,8 +537,8 @@ for path in path_select:
         irf_hist[startindex] = 1
     
     elif irf_source== 'auto' and j==0:
-        print('IRF: Auto construction')
-        irf_hist=auto_irf(decay_hist, timestamps, window_ma, smooth_irf=smooth_irf, save_fig=True)
+        print('IRF: Auto construction of IRF')
+        irf_hist=auto_irf(decay_hist, timestamps, window_ma, smooth_irf, save_fig=True)
         #irf_hist=np.append(irf_hist, np.zeros(len(decay_hist)-len(irf_hist)))
         # for convolution the surface ara of the irf needs to be set to 1
         irf_hist = irf_hist/np.sum(irf_hist)
@@ -567,11 +564,7 @@ for path in path_select:
 
     #%% #make model definitions
     if window_ma >1:
-        if np.diff(timestamps)[0] >30*1E-12:
-            print(f"NOTE: decay smoothing, time resolution {np.diff(timestamps)[0]*1E12:.1f}ps is low: decay smoothing {window_ma} is set back to 1.")
-            window_ma=1
-            
-        print(f'NOTE: decay smoothing, moving average n={window_ma} over decay curve before fitting.')
+        print(f'NOTE: moving average n={window_ma} over decay curve before fitting')
         decay_hist=moving_average(decay_hist, window_ma, method="same")
 
 
@@ -637,6 +630,32 @@ for path in path_select:
             baseline = params["baseline"].value
             offset = params["offset"].value
             return (y - model_3exp(x, tau_1, tau_2, tau_3, ampl_1, ampl_2, ampl_3, baseline, offset)) * weights
+        
+        
+    elif fit_order == 'quadruple':
+    
+        def model_4exp(x, tau_1, tau_2, tau_3, tau_4, ampl_1, ampl_2, ampl_3, ampl_4, baseline, offset, irf=irf_hist):
+            y = np.zeros(x.size)
+            y = ampl_1 * np.exp(-x/tau_1) + ampl_2 * np.exp(-x/tau_2) + ampl_3 * np.exp(-x/tau_3) + ampl_4 * np.exp(-x/tau_4)
+            z = np.convolve(y, irf_shift(irf, offset))
+            z += baseline
+            return z[:x.size]
+        
+        def residuals_4exp(params, x, y, weights):
+            """
+            Returns the array of residuals for the current parameters.
+            """
+            tau_1 = params["tau_1"].value
+            tau_2 = params["tau_2"].value
+            tau_3 = params["tau_3"].value
+            tau_4 = params["tau_4"].value
+            ampl_1 = params["ampl_1"].value
+            ampl_2 = params["ampl_2"].value
+            ampl_3 = params["ampl_3"].value
+            ampl_4 = params["ampl_4"].value
+            baseline = params["baseline"].value
+            offset = params["offset"].value
+            return (y - model_4exp(x, tau_1, tau_2, tau_3, tau_4, ampl_1, ampl_2, ampl_3, ampl_4, baseline, offset)) * weights    
 
     #%%  Weights for proper scaling of the residuals according to the Poisson standard deviation.
     
@@ -671,7 +690,7 @@ for path in path_select:
         
         t_nlls_1exp = fit_nlls_1exp.params["tau"].value
         a_nlls_1exp = fit_nlls_1exp.params["ampl"].value
-        file_fit_values= pd.DataFrame([[tail,t_nlls_1exp,a_nlls_1exp]],   columns=['file','t1', 'a1'])
+        file_fit_values= pd.DataFrame([[f_name,t_nlls_1exp,a_nlls_1exp]],   columns=['file','t1', 'a1'])
 
     #%% In[20]:
 
@@ -705,7 +724,7 @@ for path in path_select:
         f1_nlls_2exp = a1_nlls_2exp / (a1_nlls_2exp + a2_nlls_2exp)
         f2_nlls_2exp = a2_nlls_2exp / (a1_nlls_2exp + a2_nlls_2exp)
         tav_nlls_2exp =((a1_nlls_2exp/time_step_ns)*t1_nlls_2exp**2+(a2_nlls_2exp/time_step_ns)*t2_nlls_2exp**2)/sum(decay_hist)
-        file_fit_values= pd.DataFrame([[tail,t1_nlls_2exp,t2_nlls_2exp,tav_nlls_2exp,a1_nlls_2exp,a2_nlls_2exp]],   columns=['file','t1', 't2','tav', 'a1', 'a2'])
+        file_fit_values= pd.DataFrame([[f_name,t1_nlls_2exp,t2_nlls_2exp,tav_nlls_2exp,a1_nlls_2exp,a2_nlls_2exp]],   columns=['file','t1', 't2','tav', 'a1', 'a2'])
         
 
     # %%
@@ -750,8 +769,58 @@ for path in path_select:
             (a1_nlls_3exp + a2_nlls_3exp + a3_nlls_3exp)
         tav_nlls_3exp =((a1_nlls_3exp/time_step_ns)*t1_nlls_3exp**2+(a2_nlls_3exp/time_step_ns)*t2_nlls_3exp**2+(a3_nlls_3exp/time_step_ns)*t3_nlls_3exp**2)/sum(decay_hist)
         
-        file_fit_values= pd.DataFrame([[tail,t1_nlls_3exp,t2_nlls_3exp,t3_nlls_3exp,tav_nlls_3exp,a1_nlls_3exp,a2_nlls_3exp,a2_nlls_3exp]],   columns=['file','t1', 't2','t3', 'tav', 'a1', 'a2','a3'])
+        file_fit_values= pd.DataFrame([[f_name,t1_nlls_3exp,t2_nlls_3exp,t3_nlls_3exp,tav_nlls_3exp,a1_nlls_3exp,a2_nlls_3exp,a2_nlls_3exp]],   columns=['file','t1', 't2','t3', 'tav', 'a1', 'a2','a3'])
     
+      
+    if fit_order == 'quadruple':
+        #SET BOUNDARIES 3exp  value= lifetime set vary to Fasle to fix a fit parameter min and max boundary
+        
+        params_4exp = lmfit.Parameters()
+        params_4exp.add("tau_1", value=ig_t1, vary =True,  min=0.2, max=10)
+        params_4exp.add("tau_2", value=ig_t2, vary =True, min=0.2, max=40)
+        params_4exp.add("tau_3", value=ig_t3, vary =True, min=0.2, max=60)
+        params_4exp.add("tau_4", value=ig_t4, vary =True, min=0.2, max=180)
+
+        params_4exp.add("ampl_1", value=ig_ampl_1, vary =True, min=0)
+        params_4exp.add("ampl_2", value=ig_ampl_2, vary =True, min=0)
+        params_4exp.add("ampl_3", value=ig_ampl_3, vary =True, min=0)
+        params_4exp.add("ampl_4", value=ig_ampl_4, vary =True, min=0)
+        params_4exp.add("baseline", value=ig_baseline, vary =True, min=0)
+        params_4exp.add("offset", value=ig_offset, vary =True, min=-5, max=5)
+        
+        params_4exp_ig = copy.deepcopy(params_4exp)
+
+        mini_4exp = lmfit.Minimizer(
+            residuals_4exp,
+            params_4exp,
+            fcn_args=(time_ns, decay_hist, weights),
+            nan_policy="omit"
+        )
+        fit_nlls_4exp = mini_4exp.minimize(method='leastsq')
+        print('\nNLLS fit results lmfit.minimizer')
+        lmfit.report_fit(fit_nlls_4exp,show_correl=False)
+        
+        t1_nlls_4exp = fit_nlls_4exp.params["tau_1"].value
+        t2_nlls_4exp = fit_nlls_4exp.params["tau_2"].value
+        t3_nlls_4exp = fit_nlls_4exp.params["tau_3"].value
+        t4_nlls_4exp = fit_nlls_4exp.params["tau_4"].value
+        a1_nlls_4exp = fit_nlls_4exp.params["ampl_1"].value
+        a2_nlls_4exp = fit_nlls_4exp.params["ampl_2"].value
+        a3_nlls_4exp = fit_nlls_4exp.params["ampl_3"].value
+        a4_nlls_4exp = fit_nlls_4exp.params["ampl_4"].value
+        f1_nlls_4exp = a1_nlls_4exp / \
+            (a1_nlls_4exp + a2_nlls_4exp + a3_nlls_4exp + a4_nlls_4exp)
+        f2_nlls_4exp = a2_nlls_4exp / \
+            (a1_nlls_4exp + a2_nlls_4exp + a3_nlls_4exp + a4_nlls_4exp)
+        f3_nlls_4exp = a3_nlls_4exp / \
+            (a1_nlls_4exp + a2_nlls_4exp + a3_nlls_4exp + a4_nlls_4exp)
+        f4_nlls_4exp = a4_nlls_4exp / \
+            (a1_nlls_4exp + a2_nlls_4exp + a3_nlls_4exp + a4_nlls_4exp)
+            
+        tav_nlls_4exp =((a1_nlls_4exp/time_step_ns)*t1_nlls_4exp**2+(a2_nlls_4exp/time_step_ns)*t2_nlls_4exp**2+(a3_nlls_4exp/time_step_ns)*t3_nlls_4exp**2+(a4_nlls_4exp/time_step_ns)*t3_nlls_4exp**2)/sum(decay_hist)
+        
+        file_fit_values= pd.DataFrame([[f_name,t1_nlls_4exp,t2_nlls_4exp,t3_nlls_4exp,t4_nlls_4exp, tav_nlls_4exp,a1_nlls_4exp,a2_nlls_4exp,a3_nlls_4exp, a4_nlls_4exp]],   columns=['file','t1', 't2','t3','t4', 'tav', 'a1', 'a2','a3','a4'])
+  
 
      
     # In[31]:
@@ -863,7 +932,7 @@ for path in path_select:
         a_mle_1exp = fit_mle_1exp_params["ampl"].value
         t_mle_1exp = fit_mle_1exp_params["tau"].value
         tav_mle_1exp = t_mle_1exp
-        file_fit_values= pd.DataFrame([[tail,t_mle_1exp,tav_mle_1exp,a_mle_1exp]],   columns=['file','t1' ,'tav', 'a1' ])
+        file_fit_values= pd.DataFrame([[f_name,t_mle_1exp,tav_mle_1exp,a_mle_1exp]],   columns=['file','t1' ,'tav', 'a1' ])
     
     elif fit_order == 'double' and method == 'Nelder-Mead':
         
@@ -891,7 +960,7 @@ for path in path_select:
         f1_mle_2exp = a1_mle_2exp / (a1_mle_2exp + a2_mle_2exp)
         f2_mle_2exp = a2_mle_2exp / (a1_mle_2exp + a2_mle_2exp)
         tav_mle_2exp= ((a1_mle_2exp/time_step_ns)*t1_mle_2exp**2+(a2_mle_2exp/time_step_ns)*t2_mle_2exp**2)/sum(decay_hist)
-        file_fit_values= pd.DataFrame([[tail,t1_mle_2exp,t2_mle_2exp,tav_mle_2exp,a1_mle_2exp,a2_mle_2exp]],   columns=['file','t1', 't2','tav', 'a1', 'a2'])
+        file_fit_values= pd.DataFrame([[f_name,t1_mle_2exp,t2_mle_2exp,tav_mle_2exp,a1_mle_2exp,a2_mle_2exp]],   columns=['file','t1', 't2','tav', 'a1', 'a2'])
         
     elif fit_order == 'triple' and method == 'Nelder-Mead':
         
@@ -919,7 +988,7 @@ for path in path_select:
         f2_mle_3exp = a2_mle_3exp / (a1_mle_3exp + a2_mle_3exp + a3_mle_3exp)
         f3_mle_3exp = a3_mle_3exp / (a1_mle_3exp + a2_mle_3exp + a3_mle_3exp)
         tav_mle_3exp= ((a1_mle_3exp/time_step_ns)*t1_mle_3exp**2+(a2_mle_3exp/time_step_ns)*t2_mle_3exp**2+(a3_mle_3exp/time_step_ns)*t3_mle_3exp**2)/sum(decay_hist)
-        file_fit_values= pd.DataFrame([[tail,t1_mle_3exp,t2_mle_3exp,t3_mle_3exp,tav_mle_3exp,a1_mle_3exp,a2_mle_3exp,a3_mle_3exp]],   columns=['file','t1', 't2','3','tav', 'a1', 'a2', 'a3'])
+        file_fit_values= pd.DataFrame([[f_name,t1_mle_3exp,t2_mle_3exp,t3_mle_3exp,tav_mle_3exp,a1_mle_3exp,a2_mle_3exp,a3_mle_3exp]],   columns=['file','t1', 't2','3','tav', 'a1', 'a2', 'a3'])
 
 
 
@@ -960,7 +1029,7 @@ for path in path_select:
 
         ax[0].grid(True)
         ax[0].grid(True, which="minor", lw=0.3)
-        ax[0].set_title(sample_name+"  |  1 exponential fit  "+tail)
+        ax[0].set_title(sample_name+"  |  1 exponential fit  "+f_name)
         ax[0].set_ylabel("Counts [-]")
         ax[0].set_ylim(1)
         ax[0].set_xlim(0,xlim_max)
@@ -977,18 +1046,15 @@ for path in path_select:
         plt.show()
         
         if save_fig:
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            fig.savefig(fname_save+os.path.splitext(tail)
-                        [0]+'_1expfit.png', bbox_inches='tight', dpi=300)
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            fig.savefig(f'{d_name_save}{os.path.splitext(f_name)[0]}__1expfit.png', bbox_inches='tight', dpi=fig_dpi)
 
             if Save_data_files==True:
                 save_df = pd.DataFrame({'time ns': time_ns, 'IRF': irf_display,'decay': decay_hist, 'fit': model_1exp(time_ns, **{k: v.value for k, v in fit_nlls_1exp.params.items()}), 'residuals':fit_nlls_1exp.residual})
-                fname_save = head+output_dname
-                if not os.path.exists(fname_save):
-                    os.makedirs(fname_save)
-                save_df.to_csv(fname_save+os.path.splitext(tail)[0]+'_1expfit.dat', index=False,  float_format='%.3f')
+                if not os.path.exists(d_name_save):
+                    os.makedirs(d_name_save)
+                save_df.to_csv(f'{d_name_save}{os.path.splitext(f_name)[0]}__1expfit.dat', index=False,  float_format='%.3f')
                 
     
 # %% Plotting Double EXP
@@ -1017,10 +1083,10 @@ for path in path_select:
                       transform=ax[0, 0].transAxes, fontsize=12)
         ax[0, 0].grid(True)
         ax[0, 0].grid(True, which="minor", lw=0.3)
-        ax[0, 0].set_title(sample_name+"  |  2exp fit  "+ "\n"+ tail, fontsize=11)
+        ax[0, 0].set_title(sample_name+"  |  2exp fit  "+ "\n"+ f_name, fontsize=11)
         ax[0, 0].set_ylabel("Counts [-]")
         ax[0, 0].set_xlim(0,xlim_max)
-        ax[0, 0].set_ylim(0.7)
+        ax[0, 0].set_ylim(1)
         ax[0, 0].legend(loc='upper center', fontsize=11)
 
         ax[0, 1].semilogy(time_ns, irf_display, ".", label="IRF", alpha=0.5)
@@ -1050,18 +1116,17 @@ for path in path_select:
         ax[1, 0].grid(True)
         plt.show()
         if save_fig:
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            fig.savefig(fname_save+os.path.splitext(tail)
-                        [0]+'__2expfit.png', bbox_inches='tight', dpi=300)
+           
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            fig.savefig(f'{d_name_save}{os.path.splitext(f_name)[0]}__2expfit.png', bbox_inches='tight', dpi=fig_dpi)
 
         if Save_data_files==True:
             save_df = pd.DataFrame({'time ns': time_ns, 'IRF': irf_display,'decay': decay_hist, 'fit': model_2exp(time_ns, **{k: v.value for k, v in fit_nlls_2exp.params.items()}), 'residuals':fit_nlls_2exp.residual})
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            save_df.to_csv(fname_save+os.path.splitext(tail)[0]+'__2expfit.dat', index=False, float_format='%.3f')
+         
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            save_df.to_csv(f'{d_name_save}{os.path.splitext(f_name)[0]}__2expfit.dat', index=False, float_format='%.3f')
 
 # %%
     if fit_order == 'double' and method =='Nelder-Mead' :
@@ -1126,9 +1191,9 @@ for path in path_select:
 
         ax[0].grid(True)
         ax[0].grid(True, which="minor", lw=0.3)
-        ax[0].set_title(sample_name+"  |  2 exponential fit "+"\n"+tail)
+        ax[0].set_title(sample_name+"  |  2 exponential fit "+"\n"+f_name)
         ax[0].set_ylabel("Counts [-]")
-        ax[0].set_ylim(0.7)
+        ax[0].set_ylim(1)
         ax[0].set_xlim(0,xlim_max)
         ax[0].legend(loc='upper center', fontsize=11)
 
@@ -1142,18 +1207,17 @@ for path in path_select:
         ax[1].grid(True)
         plt.show()
         if save_fig:
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            fig.savefig(fname_save+os.path.splitext(tail)
-                        [0]+'_2expfit.png', bbox_inches='tight', dpi=300)
+   
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            fig.savefig(f'{d_name_save}{os.path.splitext(f_name)[0]}__2expfit.png', bbox_inches='tight', dpi=fig_dpi)
         
         if Save_data_files:
             save_df = pd.DataFrame({'time ns': time_ns, 'IRF': irf_display,'decay': decay_hist, 'fit': model_2exp(time_ns, **{k: v.value for k, v in fit_nlls_2exp.params.items()}), 'residuals':fit_nlls_2exp.residual})
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            save_df.to_csv(fname_save+os.path.splitext(tail)[0]+'_2expfit.dat',index=False, float_format='%.3f')
+           
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            save_df.to_csv(f'{d_name_save}{os.path.splitext(f_name)[0]}__2expfit.dat',index=False, float_format='%.3f')
 
 # %% Plotting Triple EXP
 
@@ -1180,10 +1244,10 @@ for path in path_select:
                       transform=ax[0, 0].transAxes, fontsize=12)
         ax[0, 0].grid(True)
         ax[0, 0].grid(True, which="minor", lw=0.3)
-        ax[0, 0].set_title(sample_name+"  |  3exp fit "+"\n"+ tail)
+        ax[0, 0].set_title(sample_name+"  |  3exp fit "+"\n"+ f_name)
         ax[0, 0].set_ylabel("Counts [-]")
         ax[0, 0].set_xlim(0,xlim_max)
-        ax[0, 0].set_ylim(0.7)
+        ax[0, 0].set_ylim(1)
         ax[0, 0].legend(loc='upper center', fontsize=11)
 
         ax[0, 1].semilogy(time_ns, irf_display, ".", label="IRF", alpha=0.5)
@@ -1213,38 +1277,94 @@ for path in path_select:
         ax[1, 0].grid(True)
         plt.show()
         if save_fig:
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            fig.savefig(fname_save+os.path.splitext(tail)
-                        [0]+'_3expfit.png', bbox_inches='tight', dpi=300)
+           
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            fig.savefig(f'{d_name_save}{os.path.splitext(f_name)[0]}__3expfit.png', bbox_inches='tight', dpi=fig_dpi)
 
-        if Save_data_files==True:
+        if Save_data_files:
             save_df = pd.DataFrame({'time ns': time_ns, 'IRF': irf_display,'decay': decay_hist, 'fit': model_3exp(time_ns, **{k: v.value for k, v in fit_nlls_3exp.params.items()}), 'residuals':fit_nlls_3exp.residual})
-            fname_save = head+output_dname
-            if not os.path.exists(fname_save):
-                os.makedirs(fname_save)
-            save_df.to_csv(fname_save+os.path.splitext(tail)[0]+'_3expfit.dat', index=False, float_format='%.3f')
-        
+          
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            save_df.to_csv(f'{d_name_save}{os.path.splitext(f_name)[0]}__3expfit.dat', index=False, float_format='%.3f')
 
+    if fit_order == 'quadruple':
+   
+        para = f"$\\tau_1$ = {t1_nlls_4exp:.2f} ns" + "\n" + f"$\\tau_2$ = {t2_nlls_4exp:.2f} ns" + "\n" + f"$\\tau_3$ = {t3_nlls_4exp:.2f} ns" + "\n" +f"$\\tau_4$ = {t4_nlls_4exp:.2f} ns" + "\n" + \
+            "$\\tau {int}$"+f"= {tav_nlls_4exp:.2f} ns" + \
+            "\n\n"+f"A$_1$ = {a1_nlls_4exp:.3g}"        + \
+            "\n" + f"A$_2$ = {a2_nlls_4exp:.3g}"        + \
+            "\n" + f"A$_3$ = {a3_nlls_4exp:.3g}"       + \
+            "\n" + f"A$_4$ = {a4_nlls_4exp:.3g}"
+   
+        fig, ax = plt.subplots(2, 2, figsize=(12, 6),  gridspec_kw={
+                               'height_ratios': [7, 2], 'width_ratios': [5, 1.5]})
+   
+        ax[0, 0].semilogy(time_ns, irf_display, ".", label="IRF", alpha=0.5)
+        ax[0, 0].semilogy(time_ns, decay_hist, ".", label="Decay", alpha=0.1)
+        if plot_ig_fig:
+            ax[0, 0].semilogy(time_ns, model_4exp(
+                time_ns, **{k: v.value for k, v in params_4exp_ig.items()}), "steelblue", label="initial guess" , alpha =0.15)
+        ax[0, 0].semilogy(time_ns, model_4exp(
+            time_ns, **{k: v.value for k, v in fit_nlls_4exp.params.items()}), "green", label="NLLS | leastsq | 4-exp" , alpha =0.8)
+        ym = max(fit_nlls_4exp.residual)
+        ax[0, 0].text(.79, 0.97, para, va="top", ha="left",
+                      transform=ax[0, 0].transAxes, fontsize=12)
+        ax[0, 0].grid(True)
+        ax[0, 0].grid(True, which="minor", lw=0.3)
+        ax[0, 0].set_title(sample_name+"  |  4exp fit "+"\n"+ f_name)
+        ax[0, 0].set_ylabel("Counts [-]")
+        ax[0, 0].set_xlim(0,xlim_max)
+        ax[0, 0].set_ylim(1)
+        ax[0, 0].legend(loc='upper center', fontsize=11)
+   
+        ax[0, 1].semilogy(time_ns, irf_display, ".", label="IRF", alpha=0.5)
+        ax[0, 1].semilogy(time_ns, decay_hist, ".", label="Decay", alpha=0.3)
+        ax[0, 1].semilogy(time_ns, model_4exp(
+            time_ns, **{k: v.value for k, v in fit_nlls_4exp.params.items()}), "g", label="NLLS | leastsq | 4-exp")
+        ax[0, 1].set_title('Short time')
+        ax[0, 1].set_xlim(1, 5)
+        ax[0, 1].grid(True)
+        ax[0, 1].grid(True, which="minor", lw=0.3)
+        ax[0, 1].set_ylabel("Counts [-]")
+   
+        ax[1, 1].plot(time_ns, fit_nlls_4exp.residual, "g", alpha =0.6)
+        ax[1, 1].set_xlim(2, 5)
+        ax[1, 1].grid(True)
+        ax[1, 1].grid(True, which="minor", lw=0.3)
+        ax[1, 1].set_xlabel("Time [ns]")
+   
+        ym = 10
+        ax[1, 0].plot(time_ns, fit_nlls_4exp.residual, "g", alpha =0.6)
+        ax[1, 0].set_title('Residuals' )
+        ax[1, 0].set_ylim(-ym, ym)
+        ax[1, 0].set_xlim(0,xlim_max)
+        ax[1, 0].text(.79, 0.96, f'$\chi_v^2$ = {fit_nlls_4exp.redchi:.3f}', va="top", ha="left", transform=ax[1, 0].transAxes, fontsize=11)
+        ax[1, 0].set_xlabel("Time [ns]")
+        ax[1, 0].set_ylabel("Residuals [-]")
+        ax[1, 0].grid(True)
+        plt.show()
+        if save_fig:
+          
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            fig.savefig(f'{d_name_save}{os.path.splitext(f_name)[0]}__4expfit.png', bbox_inches='tight', dpi=fig_dpi)
+   
+        if Save_data_files==True:
+            save_df = pd.DataFrame({'time ns': time_ns, 'IRF': irf_display,'decay': decay_hist, 'fit': model_4exp(time_ns, **{k: v.value for k, v in fit_nlls_4exp.params.items()}), 'residuals':fit_nlls_4exp.residual})
+            
+            if not os.path.exists(d_name_save):
+                os.makedirs(d_name_save)
+            save_df.to_csv(f'{d_name_save}{os.path.splitext(f_name)[0]}__4expfit.dat', index=False, float_format='%.3f')
+  
     Group_fit_values_df=pd.concat([Group_fit_values_df,file_fit_values])    
-    
-    j += 1
-
-
-#fin max index. 
-
-
-
+   
 
 if Save_fit_values:
-  
-    fname_save = head+output_dname
-    if not os.path.exists(fname_save):
-        os.makedirs(fname_save)
-    Group_fit_values_df.to_csv(fname_save+'X_'+os.path.splitext(tail)[0]+'_fit_values.dat', index=False, float_format='%.4f')
-
-
-
-
+    
+    if not os.path.exists(d_name_save):
+        os.makedirs(d_name_save)
+    Group_fit_values_df=Group_fit_values_df.dropna(axis='columns')
+    Group_fit_values_df.to_csv(f'{d_name_save}X_summary_{os.path.splitext(f_name)[0]}__fit_values.dat', index=False, float_format='%.4f')
 
