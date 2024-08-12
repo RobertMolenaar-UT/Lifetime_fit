@@ -206,12 +206,9 @@ def auto_irf(decay_hist,timestamps, window=2, threshold=60, fast_range=0.5, plot
     
     #  Convex_diff=np.diff(Convex_predict)     #predicion
     irf=np.zeros(len(Convex_predict))
-    i=0
-    
-    for k in Convex_predict[:-1]:
+    for i, k in enumerate(Convex_predict[:-1]):
         # (measured [n+1] - mesaured value [n] * fraction drop
         irf[i]=Convex_decay_plot[i+1]-(Convex_decay_plot[i]*Fall_off)
-        i+=1
     
     irf=np.roll(irf,1) # the irf got shifted by the previous operation, Her its shifted back
     #timestamps_plot2=timestamps_plot
